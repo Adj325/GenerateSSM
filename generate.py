@@ -8,7 +8,7 @@ db_user = 'root'
 
 db_password = 'mysql'
 
-package_path = 'com.feelings'
+package_path = 'com.simbook'
 
 db_name = package_path.split('.')[-1]
 db_name_cap = db_name.capitalize()
@@ -62,20 +62,27 @@ maxWait=60000
 
 with open('demo{sep}src{sep}main{sep}resources{sep}spring-mybatis.xml'.format(sep=sep), 'r', encoding='utf-8') as f:
     mybatis_content = f.read()
-    mybatis_content = mybatis_content.replace("com.demo.*", package_path + ".*")
+    mybatis_content = mybatis_content.replace("com.demo", package_path)
+    mybatis_content = mybatis_content.replace("com/demo", package_path.replace('.', '/'))
     with open('demo{sep}src{sep}main{sep}resources{sep}spring-mybatis.xml'.format(sep=sep), 'w', encoding='utf-8') as f:
         f.write(mybatis_content)
 
+with open('demo{sep}src{sep}main{sep}resources{sep}spring-mvc.xml'.format(sep=sep), 'r', encoding='utf-8') as f:
+    spring_mvc = f.read()
+    spring_mvc = spring_mvc.replace("com.demo", package_path)
+    with open('demo{sep}src{sep}main{sep}resources{sep}spring-mvc.xml'.format(sep=sep), 'w', encoding='utf-8') as f:
+        f.write(spring_mvc)
+
 with open('demo{sep}src{sep}main{sep}webapp{sep}WEB-INF{sep}web.xml'.format(sep=sep), 'r', encoding='utf-8') as f:
     web = f.read()
-    web = web.replace("demo", db_name_cap)
+    web = web.replace("Demo", db_name_cap)
     with open('demo{sep}src{sep}main{sep}webapp{sep}WEB-INF{sep}web.xml'.format(sep=sep), 'w', encoding='utf-8') as f:
         f.write(web)
 
 with open('demo{sep}pom.xml'.format(sep=sep), 'r', encoding='utf-8') as f:
     web = f.read()
     web = web.replace("<groupId>com</groupId>", "<groupId>{}</groupId>".format('.'.join(package_path.split('.')[:-1:])))
-    web = web.replace("Demo", db_name_cap)
+    web = web.replace("demo", db_name)
     web = web.replace("<finalName>demo</finalName>", "<finalName>{}</finalName>".format(db_name))
     with open('demo{sep}pom.xml'.format(sep=sep), 'w', encoding='utf-8') as f:
         f.write(web)
@@ -121,6 +128,12 @@ shutil.rmtree(db_name + sep + 'data')
 # 从数据库中获取数据
 db = pymysql.connect("localhost", db_user, db_password, db_name)
 cursor = db.cursor()
+
+# 删除示例 userexample 表
+sql = '''DROP TABLE IF EXISTS `userexample`;'''
+cursor.execute(sql)
+db.commit()
+
 cursor.execute("show tables")
 
 tables = cursor.fetchall()
@@ -216,10 +229,13 @@ public class {table_name_cap} 左
     dao_template += '''import {package_path}.pojo.{class_name_cap};
 
 import org.apache.ibatis.annotations.Param;
+import org.springframework.stereotype.Repository;
+
 import java.util.List;\n'''
 
     dao_template += '''
 
+@Repository
 public interface {class_name_cap}DAO 左
 
 \tvoid add{class_name_cap}(@Param("{class_name_lower}") {class_name_cap} {class_name_lower});
@@ -236,6 +252,7 @@ public interface {class_name_cap}DAO 左
 
 \tList<{class_name_cap}> getAll{class_name_cap}s();
 '''
+    # 单个外键查删
     for fk_property in fk_properties:
         dao_template += '''
 \t{class_name_cap} get{class_name_cap}By{fk_property_cap}(@Param("{fk_property_lower}") {fk_property_cap} {fk_property_lower});\n
@@ -247,12 +264,26 @@ public interface {class_name_cap}DAO 左
             package_path=package_path,
             class_name_cap=table_name_cap,
             class_name_lower=table_name.lower())
+    # 联合外键查删
+    dao_template += ''''
+\t{class_name_cap} get{class_name_cap}By{fk_properties}({fk_properties_param});\n
+\tList<{class_name_cap}> get{class_name_cap}sBy{fk_properties}({fk_properties_param});\n
+\tvoid delete{class_name_cap}By{fk_properties}({fk_properties_param});\n
+\tvoid delete{class_name_cap}sBy{fk_properties}({fk_properties_param});
+'''.format(fk_properties='And'.join([fk_property.capitalize()+'Id' for fk_property in fk_properties]),
+           fk_properties_param=', '.join(['@Param("{fk_property_lower}Id") Integer {fk_property_lower}Id'.format(fk_property_cap=fk_property.capitalize(),
+                                                                                                       fk_property_lower=fk_property.lower())
+                                          for fk_property in fk_properties]),
+            package_path=package_path,
+            class_name_cap=table_name_cap,
+            class_name_lower=table_name.lower())
 
     dao_template += '\n右\n'
     dao_str = dao_template.format(
         package_path=package_path,
         class_name_cap=table_name_cap,
         class_name_lower=table_name.lower())
+
     with open(base_path + 'dao' + os.sep + '{}DAO.java'.format(table_name_cap), 'w', encoding='utf-8') as f:
         f.write(dao_str.replace('左', '{').replace('右', '}'))
 
@@ -283,6 +314,7 @@ public interface {class_name_cap}Service 左
 
 \tList<{class_name_cap}> getAll{class_name_cap}s();
 '''
+    # 单个外键查删
     for fk_property in fk_properties:
         service_template += '''
 \t{class_name_cap} get{class_name_cap}By{fk_property_cap}({fk_property_cap} {fk_property_lower});\n
@@ -294,6 +326,20 @@ public interface {class_name_cap}Service 左
             package_path=package_path,
             class_name_cap=table_name_cap,
             class_name_lower=table_name.lower())
+    # 联合外键查删
+    service_template += ''''
+\t{class_name_cap} get{class_name_cap}By{fk_properties}({fk_properties_param});\n
+\tList<{class_name_cap}> get{class_name_cap}sBy{fk_properties}({fk_properties_param});\n
+\tvoid delete{class_name_cap}By{fk_properties}({fk_properties_param});\n
+\tvoid delete{class_name_cap}sBy{fk_properties}({fk_properties_param});
+'''.format(fk_properties='And'.join([fk_property.capitalize()+'Id' for fk_property in fk_properties]),
+           fk_properties_param=', '.join(['Integer {fk_property_lower}Id'.format(fk_property_cap=fk_property.capitalize(),
+                                                                                                       fk_property_lower=fk_property.lower())
+                                          for fk_property in fk_properties]),
+            package_path=package_path,
+            class_name_cap=table_name_cap,
+            class_name_lower=table_name.lower())
+
     service_template+= '\n右'
     service_str = service_template.format(
         package_path=package_path,
@@ -355,6 +401,7 @@ public class {class_name_cap}ServiceImpl implements {class_name_cap}Service 左
 \t\treturn {class_name_lower}DAO.getAll{class_name_cap}s();
 \t右
 '''
+    # 单个外键查删
     for fk_property in fk_properties:
         serviceImpl_template += '''
 \tpublic {class_name_cap} get{class_name_cap}By{fk_property_cap}({fk_property_cap} {fk_property_lower}) 左
@@ -377,9 +424,38 @@ public class {class_name_cap}ServiceImpl implements {class_name_cap}Service 左
             package_path=package_path,
             class_name_cap=table_name_cap,
             class_name_lower=table_name.lower())
-    serviceImpl_template+= '\n右'
 
     
+    # 联合外键查删
+    serviceImpl_template += ''''
+\tpublic {class_name_cap} get{class_name_cap}By{fk_properties}({fk_properties_param}) 左
+\t\treturn {class_name_lower}DAO.get{class_name_cap}By{fk_properties}({fk_properties_param_inner});
+\t右
+
+\tpublic List<{class_name_cap}> get{class_name_cap}sBy{fk_properties}({fk_properties_param}) 左
+\t\treturn {class_name_lower}DAO.get{class_name_cap}sBy{fk_properties}({fk_properties_param_inner});
+\t右
+
+\tpublic void delete{class_name_cap}By{fk_properties}({fk_properties_param}) 左
+\t\t{class_name_lower}DAO.delete{class_name_cap}By{fk_properties}({fk_properties_param_inner});
+\t右
+
+\tpublic void delete{class_name_cap}sBy{fk_properties}({fk_properties_param}) 左
+\t\t{class_name_lower}DAO.delete{class_name_cap}sBy{fk_properties}({fk_properties_param_inner});
+\t右
+'''.format(fk_properties='And'.join([fk_property.capitalize()+'Id' for fk_property in fk_properties]),
+           fk_properties_param=', '.join(['Integer {fk_property_lower}Id'.format(fk_property_cap=fk_property.capitalize(),
+                                                                                                       fk_property_lower=fk_property.lower())
+                                          for fk_property in fk_properties]),
+           fk_properties_param_inner=', '.join(['{fk_property_lower}Id'.format(fk_property_cap=fk_property.capitalize(),
+                                                                                                       fk_property_lower=fk_property.lower())
+                                          for fk_property in fk_properties]),
+            package_path=package_path,
+            class_name_cap=table_name_cap,
+            class_name_lower=table_name.lower())
+
+    serviceImpl_template+= '\n右'
+
     serviceImpl_str = serviceImpl_template.format(
         package_path=package_path,
         class_name_cap=table_name_cap,
@@ -722,6 +798,7 @@ public class {class_name_cap}Controller 左
     update_str = update_str.replace('左', '{').replace('右', '}')
 
     other_str = ''
+    # 单个外键查删
     for fk_property in fk_properties:
         other_str += '''
 \t<select id="get{table_name_cap}By{fk_property_cap}" parameterType="{package_path}.pojo.{fk_property_cap}" resultMap="{table_name_cap}ResultMap">
@@ -735,7 +812,7 @@ public class {class_name_cap}Controller 左
 \t\tdelete * from {table_name_cap} where {fk_property_lower}_id = #左{fk_property_lower}.id右;
 \t</delete>
 \t<delete id="get{table_name_cap}sBy{fk_property_cap}" parameterType="{package_path}.pojo.{fk_property_cap}" resultMap="{table_name_cap}ResultMap">
-\t\sdelete * from {table_name_cap} where {fk_property_lower}_id = #左{fk_property_lower}.id右;
+\t\tdelete * from {table_name_cap} where {fk_property_lower}_id = #左{fk_property_lower}.id右;
 \t</delete>
 '''.format(
         package_path=package_path,
@@ -743,8 +820,28 @@ public class {class_name_cap}Controller 左
         fk_property_cap=fk_property.capitalize(),
         fk_property_lower=fk_property.lower()
     )
+
+    # 联合外键查删
+    other_str += ''''
+\t<select id="get{table_name_cap}By{fk_properties}" resultMap="{table_name_cap}ResultMap">
+\t\tselect * from {table_name_cap} where {fk_properties_condition};
+\t</select>
+\t<select id="get{table_name_cap}sBy{fk_properties}" resultMap="{table_name_cap}ResultMap">
+\t\tselect * from {table_name_cap} where {fk_properties_condition};
+\t</select>
+
+\t<delete id="delete{table_name_cap}By{fk_properties}" resultMap="{table_name_cap}ResultMap">
+\t\tdelete * from {table_name_cap} where {fk_properties_condition};
+\t</delete>
+\t<delete id="delete{table_name_cap}sBy{fk_properties}" resultMap="{table_name_cap}ResultMap">
+\t\tdelete * from {table_name_cap} where {fk_properties_condition};
+\t</delete>
+'''.format(fk_properties='And'.join([fk_property.capitalize()+'Id' for fk_property in fk_properties]),
+           fk_properties_condition=' and '.join(['{fk_property_lower}_id = #左{fk_property_lower}Id右'.format(fk_property_lower=fk_property.lower())
+                                          for fk_property in fk_properties]),
+           table_name_cap=table_name_cap)
     other_str = other_str.replace('左', '{').replace('右', '}')
-    
+
     mapping_str = mapping_template.format(
         package_path=package_path,
         table_name_cap=table_name_cap,
@@ -761,12 +858,36 @@ public class {class_name_cap}Controller 左
               encoding='utf-8') as f:
         f.write(mapping_str)
         # input()
+# 添加 UserExample 表
+print('\n提示: 添加 userexample 表\n')
+sql = 'use ' + db_name + ';'
+cursor.execute(sql)
+sql = '''CREATE TABLE `userexample` (
+  `userExample_id`         INT(6) AUTO_INCREMENT NOT NULL,
+  `userExample_openid`     CHAR(28)    DEFAULT NULL,
+  `userExample_sessionid`  CHAR(32)    DEFAULT NULL,
+  `userExample_sessionkey` TEXT        DEFAULT NULL,
+  `userExample_avatarUrl`  TEXT        DEFAULT NULL,
+  PRIMARY KEY (`userExample_id`),
+  UNIQUE (`userExample_openid`),
+  UNIQUE (`userExample_sessionid`)
+)
+  ENGINE = InnoDB
+  DEFAULT CHARSET = utf8;
+'''
+cursor.execute(sql)
+db.commit()
+
 # 关闭数据库连接
 db.close()
 
 print('功能：根据 MySQL 数据库生成SSM代码')
 print('提示：请手动添加 tomcat-api.jar servlet-api.jar，jar包位于apache-tomcat目录下的lib目录')
 print('提示：请处理好Maven中jar包')
+print('webapp目录：{db_name_cap}{sep}src{sep}src{sep}main{sep}webapp'.format(sep=sep, db_name_cap=db_name_cap))
 print('\n针对小程序：')
 print('\n\t在UserExampleController中的login方法填写好Appid及SecretId')
 print('\n\t用户表应有字段保存sessionid, 在LoginInterceptor中过滤非法sessionid, 在Controller中根据sessionid获取用户实例')
+print('\n\t在 web.xml 中填写 appid 及 secret')
+
+
